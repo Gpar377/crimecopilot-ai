@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 # Load configurations
 load_dotenv()
 
+from sqlalchemy import text
+
 # Import local modules
 from db import SessionLocal
 from agent import agent_app
@@ -40,7 +42,7 @@ def health_check():
     db = SessionLocal()
     try:
         # Simple test query
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         db_status = "healthy"
     except Exception as e:
         db_status = f"unhealthy: {e}"
