@@ -4,6 +4,7 @@ import re
 from typing import TypedDict, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, START, END
 from sqlalchemy import text
+from neo4j import GraphDatabase
 import google.generativeai as genai
 from dotenv import load_dotenv
 
@@ -367,11 +368,280 @@ def sql_executor(state: AgentState) -> Dict[str, Any]:
         "context": context_updates
     }
 
+# Helpers for Neo4j and Graph Fallback Ingestion
+def check_neo4j_active() -> bool:
+    if not NEO4J_URI or not NEO4J_USER or not NEO4J_PASSWORD:
+        return False
+    try:
+        # verify connection with short timeout to prevent blocking local runs
+        with GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD)) as driver:
+            driver.verify_connectivity()
+        return True
+    except Exception:
+        return False
+
+def query_graph_neo4j(accused_name: Optional[str] = None, district: Optional[str] = None) -> Dict[str, Any]:
+    print("Executing live Neo4j Cypher query...")
+    
+    nodes = []
+    edges = []
+    added_node_ids = set()
+    edge_counter = 1
+    
+    # 1. Fetch paths around target accused
+    if accused_name:
+        cypher = """
+        MATCH (a:Accused)-[r]-(c) 
+        WHERE toLower(a.name) CONTAINS toLower($name)
+        RETURN a, r, c LIMIT 50
+        """
+        params = {"name": accused_name}
+    else:
+        # Default: show gang structures or general relations
+        cypher = """
+        MATCH (a1:Accused)-[r:KNOWS]-(a2:Accused)
+        RETURN a1, r, a2 LIMIT 30
+        """
+        params = {}
+        
+    try:
+        with GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD)) as driver:
+            with driver.session() as session:
+                result = session.run(cypher, params)
+                
+                # Get standard ID property depending on Node Label type
+                def get_node_id(node):
+                    props = dict(node)
+                    for prefix in ["accused", "fir", "location", "station", "vehicle", "phone", "account", "victim"]:
+                        prop_key = f"{prefix}_id"
+                        if prop_key in props:
+                            return props[prop_key]
+                    if "Phone" in node.labels and "number" in props:
+                        return props["number"]
+                    return node.element_id
+                
+                for record in result:
+                    source_obj = record["a1"] if "a1" in record else record[0]
+                    rel_obj = record["r"] if "r" in record else record[1]
+                    target_obj = record["a2"] if "a2" in record else record[2]
+                    
+                    # Parse source node
+                    src_id = get_node_id(source_obj)
+                    src_labels = list(source_obj.labels)
+                    src_type = src_labels[0] if src_labels else "Unknown"
+                    src_props = dict(source_obj)
+                    src_label = src_props.get("name") or src_props.get("fir_number") or src_props.get("number") or src_id
+                    if src_type == "Accused" and "risk_score" in src_props:
+                        src_label = f"{src_label} (Risk: {src_props['risk_score']})"
+                        
+                    if src_id not in added_node_ids:
+                        nodes.append({
+                            "data": {
+                                "id": src_id,
+                                "label": src_label,
+                                "type": src_type
+                            }
+                        })
+                        added_node_ids.add(src_id)
+                        
+                    # Parse target node
+                    tgt_id = get_node_id(target_obj)
+                    tgt_labels = list(target_obj.labels)
+                    tgt_type = tgt_labels[0] if tgt_labels else "Unknown"
+                    tgt_props = dict(target_obj)
+                    tgt_label = tgt_props.get("name") or tgt_props.get("fir_number") or tgt_props.get("number") or tgt_id
+                    if tgt_type == "Accused" and "risk_score" in tgt_props:
+                        tgt_label = f"{tgt_label} (Risk: {tgt_props['risk_score']})"
+                        
+                    if tgt_id not in added_node_ids:
+                        nodes.append({
+                            "data": {
+                                "id": tgt_id,
+                                "label": tgt_label,
+                                "type": tgt_type
+                            }
+                        })
+                        added_node_ids.add(tgt_id)
+                        
+                    # Parse relationship
+                    rel_type = rel_obj.type
+                    edges.append({
+                        "data": {
+                            "id": f"edge_{edge_counter}",
+                            "source": src_id,
+                            "target": tgt_id,
+                            "label": rel_type
+                        }
+                    })
+                    edge_counter += 1
+                    
+        return {"nodes": nodes, "edges": edges, "cypher": cypher}
+    except Exception as e:
+        print(f"Neo4j Cypher query failed: {e}")
+        return {"nodes": [], "edges": [], "cypher": cypher}
+
+def get_graph_fallback(accused_name: Optional[str] = None, district: Optional[str] = None) -> Dict[str, Any]:
+    print("Executing in-memory SQL/JSON graph fallback...")
+    
+    relationships_path = "data/relationships.json"
+    if not os.path.exists(relationships_path):
+        return {"nodes": [], "edges": []}
+        
+    with open(relationships_path, 'r') as f:
+        relationships = json.load(f)
+        
+    db = SessionLocal()
+    nodes = []
+    edges = []
+    
+    try:
+        # Step 1: Identify seed accused nodes
+        acc_query = db.query(Accused)
+        if accused_name:
+            acc_query = acc_query.filter(Accused.name.ilike(f"%{accused_name}%"))
+            
+        seed_accused = acc_query.limit(10).all()
+        seed_ids = {a.accused_id for a in seed_accused}
+        
+        if not seed_ids:
+            # Fallback seed: take first 5 accused from database
+            seed_accused = db.query(Accused).limit(5).all()
+            seed_ids = {a.accused_id for a in seed_accused}
+            
+        # Add seed accused to nodes
+        added_node_ids = set()
+        for a in seed_accused:
+            nodes.append({
+                "data": {
+                    "id": a.accused_id,
+                    "label": f"{a.name} (Risk: {a.risk_score})",
+                    "type": "Accused",
+                    "risk_score": a.risk_score
+                }
+            })
+            added_node_ids.add(a.accused_id)
+            
+        # Step 2: Traverse relationships to find connected items (1-hop)
+        edge_counter = 1
+        connected_ids = set()
+        
+        for r in relationships:
+            r_type = r.get("type")
+            source = r.get("source")
+            target = r.get("target")
+            
+            if source in seed_ids or target in seed_ids:
+                edge_id = f"edge_{edge_counter}"
+                edges.append({
+                    "data": {
+                        "id": edge_id,
+                        "source": source,
+                        "target": target,
+                        "label": r_type
+                    }
+                })
+                edge_counter += 1
+                
+                if source not in seed_ids:
+                    connected_ids.add(source)
+                if target not in seed_ids:
+                    connected_ids.add(target)
+                    
+        # Limit connected nodes to 30
+        connected_ids = list(connected_ids)[:30]
+        
+        # Step 3: Hydrate connected node details
+        for c_id in connected_ids:
+            if c_id in added_node_ids:
+                continue
+                
+            label = c_id
+            n_type = "Unknown"
+            
+            if c_id.startswith("ACC_"):
+                a = db.query(Accused).filter(Accused.accused_id == c_id).first()
+                if a:
+                    label = f"{a.name} (Risk: {a.risk_score})"
+                    n_type = "Accused"
+            elif c_id.startswith("FIR_"):
+                f = db.query(FIR).filter(FIR.fir_id == c_id).first()
+                if f:
+                    label = f.fir_number
+                    n_type = "FIR"
+            elif c_id.startswith("PS_"):
+                s = db.query(PoliceStation).filter(PoliceStation.station_id == c_id).first()
+                if s:
+                    label = s.name
+                    n_type = "PoliceStation"
+            elif c_id.startswith("LOC_"):
+                l = db.query(Location).filter(Location.location_id == c_id).first()
+                if l:
+                    label = l.name
+                    n_type = "Location"
+            elif c_id.startswith("VEH_"):
+                v = db.query(Vehicle).filter(Vehicle.vehicle_id == c_id).first()
+                if v:
+                    label = v.registration_number
+                    n_type = "Vehicle"
+            elif c_id.startswith("PH_"):
+                label = f"Phone: {c_id}"
+                n_type = "Phone"
+            elif c_id.startswith("AC_"):
+                label = f"Account: {c_id}"
+                n_type = "BankAccount"
+                
+            nodes.append({
+                "data": {
+                    "id": c_id,
+                    "label": label,
+                    "type": n_type
+                }
+            })
+            added_node_ids.add(c_id)
+            
+    finally:
+        db.close()
+        
+    return {"nodes": nodes, "edges": edges}
+
 # Node 4: Graph Executor
 def graph_executor(state: AgentState) -> Dict[str, Any]:
     print("[Node: graph_executor] Executing Neo4j Graph traversal...")
-    # In next phase we will connect Neo4j. In this phase we keep it stubbed.
-    return {}
+    intent = state.get("intent")
+    
+    if intent != "graph_network":
+        return {}
+        
+    context = state.get("context", {})
+    entities = context.get("entities", {})
+    accused_name = entities.get("accused_name")
+    district = entities.get("district")
+    
+    executed_queries = context.get("executed_queries", [])
+    
+    # Try Neo4j, fall back to in-memory traversal
+    if check_neo4j_active():
+        res = query_graph_neo4j(accused_name, district)
+        graph_results = {
+            "nodes": res.get("nodes", []),
+            "edges": res.get("edges", [])
+        }
+        if res.get("cypher"):
+            executed_queries.append({"sql": f"[Cypher] {res['cypher']}", "params": {"name": accused_name}})
+    else:
+        res = get_graph_fallback(accused_name, district)
+        graph_results = res
+        executed_queries.append({"sql": "[Fallback] Loaded in-memory SQL/JSON graph traversals", "params": {"name": accused_name}})
+        
+    context_updates = {
+        **context,
+        "executed_queries": executed_queries
+    }
+    
+    return {
+        "graph_results": graph_results,
+        "context": context_updates
+    }
 
 # Node 5: Evidence Builder
 def evidence_builder(state: AgentState) -> Dict[str, Any]:
@@ -463,6 +733,13 @@ def response_formatter(state: AgentState) -> Dict[str, Any]:
                 "fir_number": row.get("fir_number")
             } for row in sql_results if row.get("latitude") is not None]
         }
+    elif intent == "graph_network":
+        graph_results = state.get("graph_results", {})
+        nodes_cnt = len(graph_results.get("nodes", []))
+        edges_cnt = len(graph_results.get("edges", []))
+        response = f"I retrieved the criminal network graph connections. Found {nodes_cnt} associated entities (accused, vehicles, locations, phones) and {edges_cnt} active relationships."
+        vis_type = "graph"
+        vis_data = graph_results
     else:
         # Defaults
         response = "Skeleton response for intent " + intent
