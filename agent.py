@@ -11,6 +11,11 @@ from dotenv import load_dotenv
 # Load env variables
 load_dotenv()
 
+# Initialize Neo4j configuration
+NEO4J_URI = os.getenv("NEO4J_URI")
+NEO4J_USER = os.getenv("NEO4J_USER")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+
 # Import Database elements
 from db import SessionLocal, FIR, Accused, FIRAccused, PoliceStation, Location, SocioEconomicZone
 
