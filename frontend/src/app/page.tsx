@@ -276,6 +276,11 @@ export default function Home() {
 
   return (
     <div className="flex flex-1 h-screen w-screen bg-[#07090b] text-[#f1f3f5] overflow-hidden">
+      {/* Official Print Header */}
+      <div className="print-only-header">
+        <h1>Karnataka State Police</h1>
+        <p>CrimeCopilot AI - Case Analysis and Evidence Report | Generated: {new Date().toLocaleString()}</p>
+      </div>
       
       {/* 1. LEFT SIDEBAR */}
       <aside className="w-80 flex flex-col border-r border-white/5 bg-[#0a0d11]/80 backdrop-blur-md">
@@ -521,6 +526,14 @@ export default function Home() {
             {activeVis.type === 'none' && <Layers className="h-4.5 w-4.5 text-[#6b7c93]" />}
             <span>Workspace Visualizations</span>
           </div>
+          <button
+            onClick={() => window.print()}
+            className="no-print bg-[#10141b] border border-white/5 hover:border-brand-yellow/30 text-xs font-mono text-[#9eb1c2] hover:text-brand-yellow px-3 py-1.5 rounded transition-all cursor-pointer flex items-center gap-1.5"
+            title="Export Report to PDF"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            Export PDF
+          </button>
         </div>
 
         {/* Visualizer Display Area */}
