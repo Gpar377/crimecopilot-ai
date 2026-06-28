@@ -59,6 +59,7 @@ Available Intents:
 2. "graph_network": Analyzing relationships, links, associates, or contact records between suspects/accused individuals, showing who knows whom, or analyzing gang clusters.
 3. "hotspot_map": Mapping or locating crime hotspots, high-density areas, GPS coordinates, or geographical density of incidents.
 4. "similarity_search": Finding solved cases or prior incidents that are similar in nature, modus operandi, or description to a given case.
+5. "offender_profile": Querying the profile, history, risk score, background, timeline, or detailed analysis of a specific suspect, offender, or accused individual by name.
 
 Extracted Entities (must be null if not found in the query):
 - "district": The district in Karnataka mentioned (e.g. "Bengaluru Urban", "Bengaluru Rural", "Mysuru", "Mangaluru", "Hubballi-Dharwad", "Belagavi", "Kalaburagi", "Shivamogga"). Clean the name to match these exact standard values if possible.
@@ -69,7 +70,7 @@ Extracted Entities (must be null if not found in the query):
 
 You MUST return a JSON object with the following schema:
 {
-  "intent": "sql_lookup" | "graph_network" | "hotspot_map" | "similarity_search",
+  "intent": "sql_lookup" | "graph_network" | "hotspot_map" | "similarity_search" | "offender_profile",
   "entities": {
     "district": string | null,
     "crime_type": string | null,
@@ -144,6 +145,8 @@ def run_fallback_intent_regex(query: str) -> Dict[str, Any]:
         intent = "hotspot_map"
     elif "similar" in query_lower or "solved" in query_lower:
         intent = "similarity_search"
+    elif "profile" in query_lower or "risk" in query_lower or "background" in query_lower:
+        intent = "offender_profile"
         
     # Extract simple district entities
     districts = {
@@ -199,7 +202,7 @@ def run_fallback_intent_regex(query: str) -> Dict[str, Any]:
             break
             
     # Accused name extraction (crude regex fallback)
-    match_acc = re.search(r"(?:accused|suspect|suspects|named)\s+([a-zA-Z\s]+)", query)
+    match_acc = re.search(r"(?:accused|suspect|suspects|named|profile\s+of|profile\s+for|risk\s+of)\s+([a-zA-Z\s]+)", query, re.IGNORECASE)
     if match_acc:
         entities["accused_name"] = match_acc.group(1).strip()
         
@@ -260,12 +263,108 @@ def translate_to_sql_llm(query: str) -> str:
         print(f"Error translating query to SQL: {e}")
         return ""
 
+# Helper to find similar solved cases using local TF-IDF
+def find_similar_cases(query_text: str, limit: int = 5) -> List[Dict[str, Any]]:
+    db = SessionLocal()
+    try:
+        firs = db.query(FIR).all()
+        if not firs:
+            return []
+        
+        # Basic text cleaning & tokenization
+        def tokenize(text: str) -> List[str]:
+            if not text:
+                return []
+            words = re.findall(r"\b[a-z0-9]+\b", text.lower())
+            stopwords = {
+                "the", "a", "of", "and", "in", "to", "for", "with", "is", "on", 
+                "at", "by", "an", "this", "that", "from", "was", "were", "it", 
+                "as", "be", "are", "or", "case", "reported", "occurred", "filed"
+            }
+            return [w for w in words if w not in stopwords]
+
+        docs = []
+        doc_tokens = []
+        for f in firs:
+            combined_text = f"{f.crime_type} {f.modus_operandi} {f.case_description}"
+            tokens = tokenize(combined_text)
+            docs.append(f)
+            doc_tokens.append(tokens)
+
+        import math
+        from collections import defaultdict
+        
+        N = len(docs)
+        df = defaultdict(int)
+        for tokens in doc_tokens:
+            unique_tokens = set(tokens)
+            for t in unique_tokens:
+                df[t] += 1
+                
+        idf = {}
+        for t, count in df.items():
+            idf[t] = math.log((N + 1) / (count + 1)) + 1
+
+        doc_vectors = []
+        for tokens in doc_tokens:
+            tf = defaultdict(int)
+            for t in tokens:
+                tf[t] += 1
+            
+            vector = {}
+            for t, count in tf.items():
+                vector[t] = count * idf[t]
+            norm = math.sqrt(sum(v**2 for v in vector.values())) or 1.0
+            vector_norm = {t: v / norm for t, v in vector.items()}
+            doc_vectors.append(vector_norm)
+
+        query_tokens = tokenize(query_text)
+        query_tf = defaultdict(int)
+        for t in query_tokens:
+            query_tf[t] += 1
+            
+        query_vector = {}
+        for t, count in query_tf.items():
+            if t in idf:
+                query_vector[t] = count * idf[t]
+                
+        query_norm = math.sqrt(sum(v**2 for v in query_vector.values())) or 1.0
+        query_vector_norm = {t: v / query_norm for t, v in query_vector.items()}
+
+        results = []
+        for idx, doc_vec in enumerate(doc_vectors):
+            similarity = 0.0
+            for t, val in query_vector_norm.items():
+                if t in doc_vec:
+                    similarity += val * doc_vec[t]
+            
+            if similarity > 0.0:
+                results.append((docs[idx], similarity))
+                
+        results.sort(key=lambda x: x[1], reverse=True)
+        
+        top_matches = []
+        for doc, score in results[:limit]:
+            top_matches.append({
+                "fir_id": doc.fir_id,
+                "fir_number": doc.fir_number,
+                "crime_type": doc.crime_type,
+                "district": doc.district,
+                "similarity_score": round(score, 2),
+                "status": doc.status,
+                "modus_operandi": doc.modus_operandi,
+                "case_description": doc.case_description
+            })
+        return top_matches
+    finally:
+        db.close()
+
 # Node 3: SQL Executor
 def sql_executor(state: AgentState) -> Dict[str, Any]:
     print("[Node: sql_executor] Executing SQL relational queries...")
     intent = state.get("intent")
     
-    if intent != "sql_lookup" and intent != "hotspot_map":
+    if intent not in ["sql_lookup", "hotspot_map", "similarity_search", "offender_profile"]:
         return {}
         
     context = state.get("context", {})
@@ -277,8 +376,70 @@ def sql_executor(state: AgentState) -> Dict[str, Any]:
     executed_queries = []
     
     try:
-        # Check if aggregate query or complex request
-        is_aggregate = any(x in query.lower() for x in ["how many", "count", "average", "group by", "total", "highest", "lowest", "distribution"])
+        # Check similarity search intent
+        if intent == "similarity_search":
+            print("Executing TF-IDF similarity search...")
+            sql_results = find_similar_cases(query)
+            executed_queries.append({
+                "sql": "[TF-IDF] Cosine Similarity search over case descriptions",
+                "params": {"query": query}
+            })
+            
+        elif intent == "offender_profile":
+            print("Fetching detailed offender profile...")
+            accused_name = entities.get("accused_name")
+            if not accused_name:
+                match = re.search(r"(?:profile|risk|offender|suspect)\s+(?:of|for)?\s+([a-zA-Z\s]+)", query, re.IGNORECASE)
+                if match:
+                    accused_name = match.group(1).strip()
+                    
+            if accused_name:
+                name_filter = f"%{accused_name}%"
+                acc = db.query(Accused).filter(Accused.name.ilike(name_filter)).first()
+                if acc:
+                    phones = [p.number for p in acc.phones]
+                    accounts = [{"bank_name": b.bank_name, "account_number_hash": b.account_number_hash} for b in acc.bank_accounts]
+                    vehicles = [{"registration_number": v.registration_number, "type": v.type} for v in acc.vehicles]
+                    
+                    history = []
+                    assocs = db.query(FIRAccused).filter(FIRAccused.accused_id == acc.accused_id).all()
+                    for assoc in assocs:
+                        fir = db.query(FIR).filter(FIR.fir_id == assoc.fir_id).first()
+                        if fir:
+                            history.append({
+                                "fir_number": fir.fir_number,
+                                "crime_type": fir.crime_type,
+                                "district": fir.district,
+                                "role": assoc.role,
+                                "date_filed": fir.date_filed,
+                                "status": fir.status
+                            })
+                            
+                    profile_data = {
+                        "accused_id": acc.accused_id,
+                        "accused_name": acc.name,
+                        "name": acc.name,
+                        "age": acc.age,
+                        "gender": acc.gender,
+                        "address": acc.address,
+                        "risk_score": acc.risk_score,
+                        "gang_name": acc.gang_name,
+                        "phones": phones,
+                        "bank_accounts": accounts,
+                        "vehicles": vehicles,
+                        "history": history
+                    }
+                    sql_results = [profile_data]
+                    executed_queries.append({
+                        "sql": "SELECT * FROM accused WHERE name LIKE :name_filter (including related details)",
+                        "params": {"name_filter": name_filter}
+                    })
+            else:
+                sql_results = []
+                
+        else:
+            # Check if aggregate query or complex request
+            is_aggregate = any(x in query.lower() for x in ["how many", "count", "average", "group by", "total", "highest", "lowest", "distribution"])
         
         if is_aggregate and gemini_available:
             print("Detected complex/aggregate query. Translating via LLM...")
@@ -745,6 +906,33 @@ def response_formatter(state: AgentState) -> Dict[str, Any]:
         response = f"I retrieved the criminal network graph connections. Found {nodes_cnt} associated entities (accused, vehicles, locations, phones) and {edges_cnt} active relationships."
         vis_type = "graph"
         vis_data = graph_results
+    elif intent == "similarity_search":
+        if not sql_results:
+            response = "I searched for similar solved cases but found no semantic matches in the database."
+            vis_type = "none"
+        else:
+            response = f"I identified {len(sql_results)} semantically similar cases in the Karnataka State Police database."
+            vis_type = "table"
+            vis_data = {
+                "headers": ["FIR Number", "Crime Type", "District", "Similarity", "Status", "Modus Operandi"],
+                "rows": [[
+                    row.get("fir_number"),
+                    row.get("crime_type"),
+                    row.get("district"),
+                    f"{int(row.get('similarity_score', 0) * 100)}%",
+                    row.get("status"),
+                    row.get("modus_operandi", "")[:60] + "..." if len(row.get("modus_operandi", "")) > 60 else row.get("modus_operandi", "")
+                ] for row in sql_results]
+            }
+    elif intent == "offender_profile":
+        if not sql_results:
+            response = "I searched for the accused individual but could not find a matching profile in the KSP database."
+            vis_type = "none"
+        else:
+            profile = sql_results[0]
+            response = f"I retrieved the offender risk profile for {profile['name']}. Risk Score: {profile['risk_score']}/100. Gang Association: {profile['gang_name'] or 'None'}."
+            vis_type = "profile"
+            vis_data = profile
     else:
         # Defaults
         response = "Skeleton response for intent " + intent
