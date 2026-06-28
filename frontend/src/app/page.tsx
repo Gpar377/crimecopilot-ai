@@ -5,6 +5,25 @@ import {
   Shield, Send, Terminal, Database, Activity, User, Globe, MapPin, 
   Share2, Layers, AlertCircle, FileText, CheckCircle, HelpCircle, Table, Network, Flame
 } from 'lucide-react';
+import dynamic from 'next/dynamic';
+
+const NetworkGraph = dynamic(() => import('../components/NetworkGraph'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-[450px] items-center justify-center border border-white/5 bg-[#090b0e] rounded-lg">
+      <div className="text-xs font-mono text-[#6b7c93] animate-pulse">Initializing Network Canvas...</div>
+    </div>
+  )
+});
+
+const HotspotMap = dynamic(() => import('../components/HotspotMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-[450px] items-center justify-center border border-white/5 bg-[#090b0e] rounded-lg">
+      <div className="text-xs font-mono text-[#6b7c93] animate-pulse">Loading Map Coordinates...</div>
+    </div>
+  )
+});
 
 interface Message {
   sender: 'user' | 'assistant';
@@ -14,6 +33,7 @@ interface Message {
   visualization_data?: any;
   evidence_trail?: any[];
 }
+
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([
@@ -431,145 +451,14 @@ export default function Home() {
             </div>
           )}
 
-          {/* Graph Network Visualizer (High-End SVG Fallback for Cytoscape.js) */}
+          {/* Graph Network Visualizer */}
           {activeVis.type === 'graph' && activeVis.data?.nodes && (
-            <div className="glass-panel rounded-lg p-4 flex flex-col flex-1 border border-white/5 h-[400px]">
-              <div className="p-2 border-b border-white/5 font-mono text-xs uppercase text-[#9eb1c2] tracking-wider mb-4">
-                Interactive Criminal Network Graph ({activeVis.data.nodes.length} nodes)
-              </div>
-              <div className="flex-1 bg-[#090b0e] border border-white/5 rounded-lg relative overflow-hidden flex items-center justify-center">
-                
-                {/* SVG Render Tree Fallback */}
-                <svg className="w-full h-full min-h-[300px]">
-                  {/* Edges */}
-                  {activeVis.data.edges?.slice(0, 30).map((edge: any, edgeIdx: number) => {
-                    const sourceNodeIndex = activeVis.data.nodes.findIndex((n: any) => n.data.id === edge.data.source);
-                    const targetNodeIndex = activeVis.data.nodes.findIndex((n: any) => n.data.id === edge.data.target);
-                    
-                    if (sourceNodeIndex === -1 || targetNodeIndex === -1) return null;
-                    
-                    // Distribute nodes coordinates circularly for visual neatness
-                    const getCoords = (idx: number, total: number) => {
-                      const angle = (idx / total) * 2 * Math.PI;
-                      const radius = 100;
-                      return {
-                        x: 230 + radius * Math.cos(angle),
-                        y: 150 + radius * Math.sin(angle)
-                      };
-                    };
-                    
-                    const src = getCoords(sourceNodeIndex, activeVis.data.nodes.length);
-                    const tgt = getCoords(targetNodeIndex, activeVis.data.nodes.length);
-                    
-                    return (
-                      <g key={edgeIdx}>
-                        <line 
-                          x1={src.x} y1={src.y} x2={tgt.x} y2={tgt.y} 
-                          stroke={edge.data.label === 'KNOWS' ? '#06b6d4' : '#f59e0b'} 
-                          strokeWidth="1.5" strokeOpacity="0.4" 
-                        />
-                        <text 
-                          x={(src.x + tgt.x)/2} y={(src.y + tgt.y)/2 - 5}
-                          fill="#6b7c93" fontSize="8" textAnchor="middle" className="font-mono"
-                        >
-                          {edge.data.label}
-                        </text>
-                      </g>
-                    );
-                  })}
-
-                  {/* Nodes */}
-                  {activeVis.data.nodes?.slice(0, 20).map((node: any, nIdx: number) => {
-                    const angle = (nIdx / activeVis.data.nodes.length) * 2 * Math.PI;
-                    const radius = 100;
-                    const cx = 230 + radius * Math.cos(angle);
-                    const cy = 150 + radius * Math.sin(angle);
-                    
-                    // Colors per node type
-                    let fill = '#9ea1a5';
-                    if (node.data.type === 'Accused') fill = '#ef4444';
-                    else if (node.data.type === 'FIR') fill = '#3b82f6';
-                    else if (node.data.type === 'Location') fill = '#10b981';
-                    else if (node.data.type === 'Vehicle') fill = '#eab308';
-                    
-                    return (
-                      <g key={nIdx} className="cursor-pointer group">
-                        <circle cx={cx} cy={cy} r="10" fill={fill} className="transition-all hover:scale-125" />
-                        <text cx={cx} cy={cy} r="10" x={cx} y={cy - 14} fill="#f1f3f5" fontSize="8" textAnchor="middle" className="font-mono select-none font-bold">
-                          {node.data.label.split(' ')[0]}
-                        </text>
-                      </g>
-                    );
-                  })}
-                </svg>
-                
-                {/* Visualizer Legend overlay */}
-                <div className="absolute bottom-2.5 left-2.5 bg-[#07090b]/90 px-3 py-2 rounded border border-white/5 text-[9px] font-mono flex flex-col gap-1 text-[#9eb1c2]">
-                  <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-brand-red inline-block" /> Accused</div>
-                  <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500 inline-block" /> FIR Case</div>
-                  <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-green-500 inline-block" /> Location</div>
-                </div>
-              </div>
-            </div>
+            <NetworkGraph data={activeVis.data} />
           )}
 
-          {/* Heatmap Visualizer (High-End SVG Fallback Map) */}
+          {/* Heatmap Visualizer */}
           {activeVis.type === 'heatmap' && activeVis.data?.points && (
-            <div className="glass-panel rounded-lg p-4 flex flex-col flex-1 border border-white/5 h-[400px]">
-              <div className="p-2 border-b border-white/5 font-mono text-xs uppercase text-[#9eb1c2] tracking-wider mb-4">
-                Crime Hotspot density Map ({activeVis.data.points.length} points)
-              </div>
-              <div className="flex-1 bg-[#090b0e] border border-white/5 rounded-lg relative overflow-hidden flex items-center justify-center">
-                
-                {/* SVG mock map drawing */}
-                <svg className="w-full h-full min-h-[300px]" viewBox="0 0 400 300">
-                  <rect width="100%" height="100%" fill="#0a0d11" />
-                  
-                  {/* Grid lines to resemble map coordinate mapping */}
-                  <g stroke="#ffffff" strokeOpacity="0.03" strokeWidth="0.5">
-                    <line x1="50" y1="0" x2="50" y2="300" />
-                    <line x1="100" y1="0" x2="100" y2="300" />
-                    <line x1="150" y1="0" x2="150" y2="300" />
-                    <line x1="200" y1="0" x2="200" y2="300" />
-                    <line x1="250" y1="0" x2="250" y2="300" />
-                    <line x1="300" y1="0" x2="300" y2="300" />
-                    <line x1="350" y1="0" x2="350" y2="300" />
-                    
-                    <line x1="0" y1="50" x2="400" y2="50" />
-                    <line x1="0" y1="100" x2="400" y2="100" />
-                    <line x1="0" y1="150" x2="400" y2="150" />
-                    <line x1="0" y1="200" x2="400" y2="200" />
-                    <line x1="0" y1="250" x2="400" y2="250" />
-                  </g>
-
-                  {/* Draw mock region contours */}
-                  <path d="M 50 50 Q 150 30 250 80 T 350 250 L 300 280 L 100 240 Z" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
-
-                  {/* Render Heat hotspots */}
-                  {activeVis.data.points.map((pt: any, ptIdx: number) => {
-                    // Simple offset projection for visuals
-                    const cx = 100 + (ptIdx * 35) % 220;
-                    const cy = 80 + (ptIdx * 45) % 160;
-                    
-                    return (
-                      <g key={ptIdx}>
-                        {/* Heat rings */}
-                        <circle cx={cx} cy={cy} r="25" fill="#ef4444" fillOpacity="0.08" className="active-pulse" />
-                        <circle cx={cx} cy={cy} r="12" fill="#ef4444" fillOpacity="0.2" />
-                        <circle cx={cx} cy={cy} r="4" fill="#ef4444" />
-                        <text x={cx + 8} y={cy + 3} fill="#9eb1c2" fontSize="7" className="font-mono">
-                          {pt.fir_number || `Hotspot_${ptIdx+1}`}
-                        </text>
-                      </g>
-                    );
-                  })}
-                </svg>
-                
-                <div className="absolute top-2.5 right-2.5 bg-[#07090b]/80 border border-white/5 rounded px-2.5 py-1 text-[8px] font-mono text-[#9eb1c2]">
-                  Bounding Coordinates: BBMP Karnataka
-                </div>
-              </div>
-            </div>
+            <HotspotMap data={activeVis.data} />
           )}
 
           {/* Placeholder when None */}
