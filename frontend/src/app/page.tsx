@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Shield, Send, Terminal, Database, Activity, User, Globe, MapPin, 
-  Share2, Layers, AlertCircle, FileText, CheckCircle, HelpCircle, Table, Network, Flame
+  Share2, Layers, AlertCircle, FileText, CheckCircle, HelpCircle, Table, Network, Flame,
+  Mic, MicOff
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
@@ -56,6 +57,50 @@ export default function Home() {
   const [currentLogs, setCurrentLogs] = useState<string[]>([]);
   const [selectedRole, setSelectedRole] = useState<'Investigator' | 'Analyst' | 'Supervisor'>('Analyst');
   const [health, setHealth] = useState<any>(null);
+  
+  // Voice translation states
+  const [isListening, setIsListening] = useState(false);
+  const [speechLang, setSpeechLang] = useState<'en-US' | 'kn-IN'>('en-US');
+
+  const handleMicClick = () => {
+    if (typeof window === 'undefined') return;
+    
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Web Speech API is not supported in this browser. Please use Google Chrome or Microsoft Edge.");
+      return;
+    }
+
+    if (isListening) {
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = speechLang;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error", event);
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setInput(transcript);
+    };
+
+    recognition.start();
+  };
   
   // Track currently active visualizer data in right panel
   const [activeVis, setActiveVis] = useState<{
@@ -396,22 +441,59 @@ export default function Home() {
 
         {/* Input Form */}
         <div className="p-8 border-t border-white/5 bg-[#07090b]/80 backdrop-blur-md">
-          <form onSubmit={handleSubmit} className="flex items-center gap-3">
-            <input
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              placeholder="Ask CrimeCopilot: 'Show vehicle theft cases in Mysuru'..."
-              disabled={loading}
-              className="flex-1 bg-[#10141b] border border-white/5 rounded-lg py-3.5 px-5 text-sm font-sans focus:outline-none focus:border-brand-cyan/40 transition-colors disabled:opacity-60 placeholder-[#6b7c93]"
-            />
-            <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className="bg-brand-cyan hover:bg-brand-cyan/80 text-background p-3.5 rounded-lg transition-all shadow-md shadow-brand-cyan/10 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-            >
-              <Send className="h-4.5 w-4.5" />
-            </button>
+          <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+            <div className="flex items-center gap-3">
+              {/* Language Selector for Voice */}
+              <button
+                type="button"
+                onClick={() => setSpeechLang(prev => prev === 'en-US' ? 'kn-IN' : 'en-US')}
+                className="bg-[#10141b] border border-white/5 hover:border-white/10 rounded-lg px-3 py-3.5 text-xs font-mono text-[#9eb1c2] hover:text-[#f1f3f5] transition-all cursor-pointer select-none"
+                title="Toggle Voice Language (English / Kannada)"
+              >
+                {speechLang === 'en-US' ? 'EN' : 'ಕನ್ನಡ'}
+              </button>
+
+              {/* Speech Recognition Button */}
+              <button
+                type="button"
+                onClick={handleMicClick}
+                className={`border rounded-lg p-3.5 transition-all cursor-pointer ${
+                  isListening 
+                    ? 'bg-red-500/10 border-red-500 text-red-500 animate-pulse' 
+                    : 'bg-[#10141b] border-white/5 hover:border-white/10 text-[#9eb1c2] hover:text-[#f1f3f5]'
+                }`}
+                title="Trigger Speech Input"
+              >
+                {isListening ? <MicOff className="h-4.5 w-4.5" /> : <Mic className="h-4.5 w-4.5" />}
+              </button>
+
+              <input
+                type="text"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                placeholder={
+                  isListening 
+                    ? "Listening..." 
+                    : speechLang === 'kn-IN'
+                      ? "ಕನ್ನಡದಲ್ಲಿ ಮಾತನಾಡಿ (e.g. ವಾಹನ ಕಳ್ಳತನ ಪ್ರಕರಣಗಳನ್ನು ತೋರಿಸಿ)..."
+                      : "Ask CrimeCopilot: 'Show vehicle theft cases in Mysuru'..."
+                }
+                disabled={loading}
+                className="flex-1 bg-[#10141b] border border-white/5 rounded-lg py-3.5 px-5 text-sm font-sans focus:outline-none focus:border-brand-cyan/40 transition-colors disabled:opacity-60 placeholder-[#6b7c93]"
+              />
+              <button
+                type="submit"
+                disabled={loading || !input.trim()}
+                className="bg-brand-cyan hover:bg-brand-cyan/80 text-background p-3.5 rounded-lg transition-all shadow-md shadow-brand-cyan/10 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <Send className="h-4.5 w-4.5" />
+              </button>
+            </div>
+            {isListening && (
+              <div className="text-[10px] font-mono text-red-400/80 pl-[125px]">
+                Speak clearly. Web Speech Engine is recording in {speechLang === 'en-US' ? 'English' : 'Kannada (Karnataka)'}...
+              </div>
+            )}
           </form>
         </div>
       </main>
