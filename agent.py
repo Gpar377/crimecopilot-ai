@@ -425,6 +425,7 @@ def sql_executor(state: AgentState) -> Dict[str, Any]:
     executed_queries = []
     
     try:
+        is_aggregate = False
         # Check similarity search intent
         if intent == "similarity_search":
             print("Executing TF-IDF similarity search...")
