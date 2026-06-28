@@ -82,3 +82,93 @@ body {
 .active-pulse {
   animation: pulse-glow 2s infinite ease-in-out;
 }
+
+/* Print Media Styles for Official Reports */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 12pt !important;
+  }
+
+  /* Hide unnecessary elements on printed sheets */
+  aside, 
+  nav, 
+  button, 
+  form,
+  .no-print,
+  .chat-input-container,
+  section.w-\[260px\], /* Left Telemetry Panel */
+  .border-r,
+  header {
+    display: none !important;
+  }
+
+  /* Remove absolute sizing and make page single-column printable */
+  main, 
+  section, 
+  div {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    position: static !important;
+    overflow: visible !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    color: #000000 !important;
+  }
+
+  /* Add official police header on print sheets */
+  .print-only-header {
+    display: block !important;
+    border-bottom: 2px solid #000000;
+    margin-bottom: 20px;
+    padding-bottom: 8px;
+    text-align: center;
+  }
+
+  .print-only-header h1 {
+    font-size: 20pt;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .print-only-header p {
+    font-size: 10pt;
+    margin-top: 4px;
+    color: #555;
+  }
+
+  /* Tables formatting for readability in grayscale */
+  table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+    margin-top: 15px !important;
+  }
+
+  th, td {
+    border: 1px solid #ddd !important;
+    padding: 8px !important;
+    color: #000000 !important;
+  }
+
+  th {
+    background-color: #f2f2f2 !important;
+    font-weight: bold !important;
+  }
+
+  /* Avoid breaking pages in middle of rows */
+  tr, .glass-panel {
+    page-break-inside: avoid !important;
+  }
+}
+
+/* Screen utility to hide print-only-header on browser screens */
+@media screen {
+  .print-only-header {
+    display: none !important;
+  }
+}
