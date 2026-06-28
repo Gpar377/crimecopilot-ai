@@ -25,6 +25,15 @@ const HotspotMap = dynamic(() => import('../components/HotspotMap'), {
   )
 });
 
+const OffenderProfile = dynamic(() => import('../components/OffenderProfile'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-[450px] items-center justify-center border border-white/5 bg-[#090b0e] rounded-lg">
+      <div className="text-xs font-mono text-[#6b7c93] animate-pulse">Retrieving Offender Records...</div>
+    </div>
+  )
+});
+
 interface Message {
   sender: 'user' | 'assistant';
   text: string;
@@ -85,8 +94,10 @@ export default function Home() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || loading) return;
+    executeSearch(input);
+  };
 
-    const userQuery = input;
+  const executeSearch = async (userQuery: string) => {
     setInput('');
     setLoading(true);
     setCurrentLogs([]);
@@ -414,6 +425,7 @@ export default function Home() {
             {activeVis.type === 'table' && <Table className="h-4.5 w-4.5 text-brand-yellow text-glow-yellow" />}
             {activeVis.type === 'graph' && <Network className="h-4.5 w-4.5 text-brand-cyan text-glow-cyan" />}
             {activeVis.type === 'heatmap' && <Flame className="h-4.5 w-4.5 text-brand-red text-glow-red" />}
+            {activeVis.type === 'profile' && <User className="h-4.5 w-4.5 text-red-500 text-glow-red" />}
             {activeVis.type === 'none' && <Layers className="h-4.5 w-4.5 text-[#6b7c93]" />}
             <span>Workspace Visualizations</span>
           </div>
@@ -453,12 +465,25 @@ export default function Home() {
 
           {/* Graph Network Visualizer */}
           {activeVis.type === 'graph' && activeVis.data?.nodes && (
-            <NetworkGraph data={activeVis.data} />
+            <NetworkGraph 
+              data={activeVis.data} 
+              onNodeClick={(id, type, label) => {
+                if (type === 'Accused') {
+                  const suspectName = label.split(' (')[0];
+                  executeSearch(`Show profile for ${suspectName}`);
+                }
+              }}
+            />
           )}
 
           {/* Heatmap Visualizer */}
           {activeVis.type === 'heatmap' && activeVis.data?.points && (
             <HotspotMap data={activeVis.data} />
+          )}
+
+          {/* Profile Visualizer */}
+          {activeVis.type === 'profile' && activeVis.data && (
+            <OffenderProfile data={activeVis.data} />
           )}
 
           {/* Placeholder when None */}
