@@ -60,6 +60,7 @@ Available Intents:
 3. "hotspot_map": Mapping or locating crime hotspots, high-density areas, GPS coordinates, or geographical density of incidents.
 4. "similarity_search": Finding solved cases or prior incidents that are similar in nature, modus operandi, or description to a given case.
 5. "offender_profile": Querying the profile, history, risk score, background, timeline, or detailed analysis of a specific suspect, offender, or accused individual by name.
+6. "sociological_insights": Analyzing the correlation or relationship between socio-economic metrics (literacy rate, unemployment, median income, migration, urbanization) and crime volume or counts across districts in Karnataka.
 
 Extracted Entities (must be null if not found in the query):
 - "district": The district in Karnataka mentioned (e.g. "Bengaluru Urban", "Bengaluru Rural", "Mysuru", "Mangaluru", "Hubballi-Dharwad", "Belagavi", "Kalaburagi", "Shivamogga"). Clean the name to match these exact standard values if possible.
@@ -70,7 +71,7 @@ Extracted Entities (must be null if not found in the query):
 
 You MUST return a JSON object with the following schema:
 {
-  "intent": "sql_lookup" | "graph_network" | "hotspot_map" | "similarity_search" | "offender_profile",
+  "intent": "sql_lookup" | "graph_network" | "hotspot_map" | "similarity_search" | "offender_profile" | "sociological_insights",
   "entities": {
     "district": string | null,
     "crime_type": string | null,
@@ -147,6 +148,8 @@ def run_fallback_intent_regex(query: str) -> Dict[str, Any]:
         intent = "similarity_search"
     elif "profile" in query_lower or "risk" in query_lower or "background" in query_lower:
         intent = "offender_profile"
+    elif "sociolog" in query_lower or "literacy" in query_lower or "unemploy" in query_lower or "urbaniz" in query_lower or "correlation" in query_lower or "insight" in query_lower:
+        intent = "sociological_insights"
         
     # Extract simple district entities
     districts = {
@@ -410,7 +413,7 @@ def sql_executor(state: AgentState) -> Dict[str, Any]:
     print("[Node: sql_executor] Executing SQL relational queries...")
     intent = state.get("intent")
     
-    if intent not in ["sql_lookup", "hotspot_map", "similarity_search", "offender_profile"]:
+    if intent not in ["sql_lookup", "hotspot_map", "similarity_search", "offender_profile", "sociological_insights"]:
         return {}
         
     context = state.get("context", {})
@@ -483,6 +486,26 @@ def sql_executor(state: AgentState) -> Dict[str, Any]:
             else:
                 sql_results = []
                 
+        elif intent == "sociological_insights":
+            print("Executing Sociological Insights JOIN query...")
+            sql = """
+            SELECT 
+                sez.district,
+                sez.literacy_rate,
+                sez.unemployment_rate,
+                sez.migration_index,
+                sez.urbanization_score,
+                sez.median_income_bracket,
+                (SELECT COUNT(*) FROM firs WHERE district = sez.district) AS crime_count
+            FROM socio_economic_zones sez
+            """
+            res = db.execute(text(sql)).mappings().all()
+            sql_results = [dict(row) for row in res]
+            executed_queries.append({
+                "sql": sql.strip(),
+                "params": {}
+            })
+            
         else:
             # Check if aggregate query or complex request
             is_aggregate = any(x in query.lower() for x in ["how many", "count", "average", "group by", "total", "highest", "lowest", "distribution"])
@@ -979,6 +1002,12 @@ def response_formatter(state: AgentState) -> Dict[str, Any]:
             response = f"I retrieved the offender risk profile for {profile['name']}. Risk Score: {profile['risk_score']}/100. Gang Association: {profile['gang_name'] or 'None'}."
             vis_type = "profile"
             vis_data = profile
+    elif intent == "sociological_insights":
+        response = f"I compiled the socio-economic profiles correlated with crime density statistics for the {len(sql_results)} primary districts of Karnataka."
+        vis_type = "insights"
+        vis_data = {
+            "districts": sql_results
+        }
     else:
         # Defaults
         response = "Skeleton response for intent " + intent
