@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Shield, Send, Terminal, Database, Activity, User, Globe, MapPin, 
   Share2, Layers, AlertCircle, FileText, CheckCircle, HelpCircle, Table, Network, Flame,
-  Mic, MicOff
+  Mic, MicOff, BarChart3
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
@@ -31,6 +31,15 @@ const OffenderProfile = dynamic(() => import('../components/OffenderProfile'), {
   loading: () => (
     <div className="flex h-[450px] items-center justify-center border border-white/5 bg-[#090b0e] rounded-lg">
       <div className="text-xs font-mono text-[#6b7c93] animate-pulse">Retrieving Offender Records...</div>
+    </div>
+  )
+});
+
+const SociologicalInsights = dynamic(() => import('../components/SociologicalInsights'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-[450px] items-center justify-center border border-white/5 bg-[#090b0e] rounded-lg">
+      <div className="text-xs font-mono text-[#6b7c93] animate-pulse">Running Correlation Joins...</div>
     </div>
   )
 });
@@ -508,6 +517,7 @@ export default function Home() {
             {activeVis.type === 'graph' && <Network className="h-4.5 w-4.5 text-brand-cyan text-glow-cyan" />}
             {activeVis.type === 'heatmap' && <Flame className="h-4.5 w-4.5 text-brand-red text-glow-red" />}
             {activeVis.type === 'profile' && <User className="h-4.5 w-4.5 text-red-500 text-glow-red" />}
+            {activeVis.type === 'insights' && <BarChart3 className="h-4.5 w-4.5 text-brand-cyan text-glow-cyan" />}
             {activeVis.type === 'none' && <Layers className="h-4.5 w-4.5 text-[#6b7c93]" />}
             <span>Workspace Visualizations</span>
           </div>
@@ -566,6 +576,11 @@ export default function Home() {
           {/* Profile Visualizer */}
           {activeVis.type === 'profile' && activeVis.data && (
             <OffenderProfile data={activeVis.data} />
+          )}
+
+          {/* Insights Visualizer */}
+          {activeVis.type === 'insights' && activeVis.data && (
+            <SociologicalInsights data={activeVis.data} />
           )}
 
           {/* Placeholder when None */}
