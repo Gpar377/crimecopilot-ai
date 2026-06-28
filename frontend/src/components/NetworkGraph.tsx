@@ -8,9 +8,10 @@ interface NetworkGraphProps {
     nodes: any[];
     edges: any[];
   };
+  onNodeClick?: (id: string, type: string, label: string) => void;
 }
 
-export default function NetworkGraph({ data }: NetworkGraphProps) {
+export default function NetworkGraph({ data, onNodeClick }: NetworkGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
   const [selectedNode, setSelectedNode] = useState<any | null>(null);
@@ -143,7 +144,11 @@ export default function NetworkGraph({ data }: NetworkGraphProps) {
 
     cy.on('tap', 'node', (evt) => {
       const node = evt.target;
-      setSelectedNode(node.data());
+      const nodeData = node.data();
+      setSelectedNode(nodeData);
+      if (onNodeClick) {
+        onNodeClick(nodeData.id, nodeData.type, nodeData.label);
+      }
     });
 
     cy.on('tap', (evt) => {
