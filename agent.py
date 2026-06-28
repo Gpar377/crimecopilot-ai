@@ -212,16 +212,62 @@ def run_fallback_intent_regex(query: str) -> Dict[str, Any]:
         "explanation": "Regex fallback matching"
     }
 
+# Helper to translate Kannada queries
+def translate_kannada_to_english(text_query: str) -> str:
+    # Check if text contains Kannada characters (range 0x0C80 to 0x0CFF)
+    if any(ord(char) in range(0x0C80, 0x0CFF) for char in text_query):
+        print("Kannada query detected. Translating via LLM...")
+        if not gemini_available:
+            # Fallback simple dictionary mapping or keyword extraction
+            terms = {
+                "ವಾಹನ ಕಳ್ಳತನ": "vehicle theft",
+                "ಕಳ್ಳತನ": "theft",
+                "ಬೆಂಗಳೂರು": "Bengaluru",
+                "ಮೈಸೂರು": "Mysuru",
+                "ಪ್ರಕರಣಗಳು": "cases",
+                "ತೋರಿಸಿ": "show",
+                "ಸಂಬಂಧಗಳು": "connections",
+                "ಸಂಪರ್ಕಗಳು": "contacts",
+                "ಆರೋಪಿ": "accused",
+                "ರಂಗ": "Raju"
+            }
+            translated = text_query
+            for k, v in terms.items():
+                translated = translated.replace(k, v)
+            return translated
+            
+        try:
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            prompt = f"Translate the following Kannada crime investigation query into a clean English search query. Respond ONLY with the translated English text. Do not add any conversational text or formatting.\n\nQuery: {text_query}"
+            response = model.generate_content(prompt)
+            translated = response.text.strip()
+            print(f"Translated query: {translated}")
+            return translated
+        except Exception as e:
+            print(f"Translation failed: {e}")
+            return text_query
+    return text_query
+
 # Node 1: Intent Classifier
 def intent_classifier(state: AgentState) -> Dict[str, Any]:
     print("[Node: intent_classifier] Classifying intent and extracting entities...")
-    res = query_intent_llm(state.get("user_query", ""))
+    user_query = state.get("user_query", "")
+    translated_query = translate_kannada_to_english(user_query)
+    
+    # Run classification on the translated English query
+    res = query_intent_llm(translated_query)
+    
+    context = state.get("context", {})
+    if translated_query != user_query:
+        context["original_kannada"] = user_query
+        context["translated_english"] = translated_query
     
     # Save intent and entities in state
     return {
         "intent": res.get("intent", "sql_lookup"),
+        "user_query": translated_query, # update query in flow to use English translation
         "context": {
-            **state.get("context", {}),
+            **context,
             "entities": res.get("entities", {}),
             "explanation": res.get("explanation", "")
         }
