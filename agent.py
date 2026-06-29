@@ -622,81 +622,82 @@ def sql_executor(state: AgentState) -> Dict[str, Any]:
             # Check if aggregate query or complex request
             is_aggregate = any(x in query.lower() for x in ["how many", "count", "average", "group by", "total", "highest", "lowest", "distribution"])
         
-        if is_aggregate and gemini_available:
-            print("Detected complex/aggregate query. Translating via LLM...")
-            generated_sql = translate_to_sql_llm(query)
-            if generated_sql:
-                print(f"Executing generated SQL: {generated_sql}")
-                res = db.execute(text(generated_sql)).mappings().all()
-                sql_results = [dict(row) for row in res]
-                executed_queries.append({"sql": generated_sql, "params": {}})
-            else:
-                is_aggregate = False # Fallback to ORM filters
-                
-        if not is_aggregate:
-            # Entity-based safe ORM filters
-            print("Running entity-based ORM query filters...")
-            
-            # Scenario A: Search accused by name
-            if entities.get("accused_name"):
-                name_filter = f"%{entities['accused_name']}%"
-                accused_records = db.query(Accused).filter(Accused.name.ilike(name_filter)).all()
-                sql_results = []
-                for a in accused_records:
-                    # Retrieve their cases
-                    assocs = db.query(FIRAccused).filter(FIRAccused.accused_id == a.accused_id).all()
-                    for assoc in assocs:
-                        fir = db.query(FIR).filter(FIR.fir_id == assoc.fir_id).first()
-                        if fir:
-                            sql_results.append({
-                                "accused_id": a.accused_id,
-                                "accused_name": a.name,
-                                "risk_score": a.risk_score,
-                                "fir_id": fir.fir_id,
-                                "fir_number": fir.fir_number,
-                                "crime_type": fir.crime_type,
-                                "district": fir.district,
-                                "status": fir.status
-                            })
-                executed_queries.append({
-                    "sql": "SELECT * FROM accused WHERE name LIKE :name_filter (and associated FIRs)",
-                    "params": {"name_filter": name_filter}
-                })
-                
-            # Scenario B: Filter FIRs by District and/or Crime Type
-            else:
-                query_obj = db.query(FIR)
-                params = {}
-                
-                if entities.get("district"):
-                    query_obj = query_obj.filter(FIR.district.ilike(f"%{entities['district']}%"))
-                    params["district"] = entities["district"]
-                if entities.get("crime_type"):
-                    query_obj = query_obj.filter(FIR.crime_type == entities["crime_type"])
-                    params["crime_type"] = entities["crime_type"]
-                if entities.get("police_station"):
-                    # Join with police stations
-                    query_obj = query_obj.join(PoliceStation).filter(PoliceStation.name.ilike(f"%{entities['police_station']}%"))
-                    params["police_station"] = entities["police_station"]
+        if intent in ["sql_lookup", "hotspot_map"]:
+            if is_aggregate and gemini_available:
+                print("Detected complex/aggregate query. Translating via LLM...")
+                generated_sql = translate_to_sql_llm(query)
+                if generated_sql:
+                    print(f"Executing generated SQL: {generated_sql}")
+                    res = db.execute(text(generated_sql)).mappings().all()
+                    sql_results = [dict(row) for row in res]
+                    executed_queries.append({"sql": generated_sql, "params": {}})
+                else:
+                    is_aggregate = False # Fallback to ORM filters
                     
-                # Limit initial ORM results to 15 to keep token context concise
-                records = query_obj.limit(15).all()
-                sql_results = [{
-                    "fir_id": f.fir_id,
-                    "fir_number": f.fir_number,
-                    "crime_type": f.crime_type,
-                    "district": f.district,
-                    "date_filed": f.date_filed,
-                    "status": f.status,
-                    "modus_operandi": f.modus_operandi,
-                    "latitude": f.latitude,
-                    "longitude": f.longitude
-                } for f in records]
+            if not is_aggregate:
+                # Entity-based safe ORM filters
+                print("Running entity-based ORM query filters...")
                 
-                executed_queries.append({
-                    "sql": f"SELECT * FROM firs WHERE filters (LIMIT 15)",
-                    "params": params
-                })
+                # Scenario A: Search accused by name
+                if entities.get("accused_name"):
+                    name_filter = f"%{entities['accused_name']}%"
+                    accused_records = db.query(Accused).filter(Accused.name.ilike(name_filter)).all()
+                    sql_results = []
+                    for a in accused_records:
+                        # Retrieve their cases
+                        assocs = db.query(FIRAccused).filter(FIRAccused.accused_id == a.accused_id).all()
+                        for assoc in assocs:
+                            fir = db.query(FIR).filter(FIR.fir_id == assoc.fir_id).first()
+                            if fir:
+                                sql_results.append({
+                                    "accused_id": a.accused_id,
+                                    "accused_name": a.name,
+                                    "risk_score": a.risk_score,
+                                    "fir_id": fir.fir_id,
+                                    "fir_number": fir.fir_number,
+                                    "crime_type": fir.crime_type,
+                                    "district": fir.district,
+                                    "status": fir.status
+                                })
+                    executed_queries.append({
+                        "sql": "SELECT * FROM accused WHERE name LIKE :name_filter (and associated FIRs)",
+                        "params": {"name_filter": name_filter}
+                    })
+                    
+                # Scenario B: Filter FIRs by District and/or Crime Type
+                else:
+                    query_obj = db.query(FIR)
+                    params = {}
+                    
+                    if entities.get("district"):
+                        query_obj = query_obj.filter(FIR.district.ilike(f"%{entities['district']}%"))
+                        params["district"] = entities["district"]
+                    if entities.get("crime_type"):
+                        query_obj = query_obj.filter(FIR.crime_type == entities["crime_type"])
+                        params["crime_type"] = entities["crime_type"]
+                    if entities.get("police_station"):
+                        # Join with police stations
+                        query_obj = query_obj.join(PoliceStation).filter(PoliceStation.name.ilike(f"%{entities['police_station']}%"))
+                        params["police_station"] = entities["police_station"]
+                        
+                    # Limit initial ORM results to 15 to keep token context concise
+                    records = query_obj.limit(15).all()
+                    sql_results = [{
+                        "fir_id": f.fir_id,
+                        "fir_number": f.fir_number,
+                        "crime_type": f.crime_type,
+                        "district": f.district,
+                        "date_filed": f.date_filed,
+                        "status": f.status,
+                        "modus_operandi": f.modus_operandi,
+                        "latitude": f.latitude,
+                        "longitude": f.longitude
+                    } for f in records]
+                    
+                    executed_queries.append({
+                        "sql": f"SELECT * FROM firs WHERE filters (LIMIT 15)",
+                        "params": params
+                    })
                 
     except Exception as e:
         print(f"SQL Execution error: {e}")
