@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Shield, Send, Terminal, Database, Activity, User, Globe, MapPin, 
   Share2, Layers, AlertCircle, FileText, CheckCircle, HelpCircle, Table, Network, Flame,
-  Mic, MicOff, BarChart3
+  Mic, MicOff, BarChart3, ClipboardList, TrendingUp
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
@@ -40,6 +40,24 @@ const SociologicalInsights = dynamic(() => import('../components/SociologicalIns
   loading: () => (
     <div className="flex h-[450px] items-center justify-center border border-white/5 bg-[#090b0e] rounded-lg">
       <div className="text-xs font-mono text-[#6b7c93] animate-pulse">Running Correlation Joins...</div>
+    </div>
+  )
+});
+
+const DecisionSupport = dynamic(() => import('../components/DecisionSupport'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-[450px] items-center justify-center border border-white/5 bg-[#090b0e] rounded-lg">
+      <div className="text-xs font-mono text-[#6b7c93] animate-pulse">Retrieving Investigator Leads...</div>
+    </div>
+  )
+});
+
+const CrimeForecast = dynamic(() => import('../components/CrimeForecast'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-[450px] items-center justify-center border border-white/5 bg-[#090b0e] rounded-lg">
+      <div className="text-xs font-mono text-[#6b7c93] animate-pulse">Calculating Proactive Trends...</div>
     </div>
   )
 });
@@ -523,6 +541,8 @@ export default function Home() {
             {activeVis.type === 'heatmap' && <Flame className="h-4.5 w-4.5 text-brand-red text-glow-red" />}
             {activeVis.type === 'profile' && <User className="h-4.5 w-4.5 text-red-500 text-glow-red" />}
             {activeVis.type === 'insights' && <BarChart3 className="h-4.5 w-4.5 text-brand-cyan text-glow-cyan" />}
+            {activeVis.type === 'decision_support' && <ClipboardList className="h-4.5 w-4.5 text-brand-yellow text-glow-yellow" />}
+            {activeVis.type === 'forecast' && <TrendingUp className="h-4.5 w-4.5 text-brand-cyan text-glow-cyan" />}
             {activeVis.type === 'none' && <Layers className="h-4.5 w-4.5 text-[#6b7c93]" />}
             <span>Workspace Visualizations</span>
           </div>
@@ -594,6 +614,16 @@ export default function Home() {
           {/* Insights Visualizer */}
           {activeVis.type === 'insights' && activeVis.data && (
             <SociologicalInsights data={activeVis.data} />
+          )}
+
+          {/* Decision Support Visualizer */}
+          {activeVis.type === 'decision_support' && activeVis.data && (
+            <DecisionSupport data={activeVis.data} />
+          )}
+
+          {/* Forecast Visualizer */}
+          {activeVis.type === 'forecast' && activeVis.data && (
+            <CrimeForecast data={activeVis.data} />
           )}
 
           {/* Placeholder when None */}
