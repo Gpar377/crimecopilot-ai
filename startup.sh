@@ -1,3 +1,3 @@
 #!/bin/sh
-python3 -m pip install -r requirements.txt
+export PYTHONPATH=/catalyst/vendor:$PYTHONPATH
 python3 main.py
